@@ -2,7 +2,7 @@
 title: "Code Sample 1"
 author: "Seth Harrison"
 date: "4/30/2020"
-output: html_document
+output: github_document
 ---
 
 ```{r setup, include=FALSE}
