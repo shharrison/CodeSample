@@ -6,25 +6,207 @@ output: html_document
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+
+library(caret)
+library(tidyverse)
+library(readr)
+library(tidytext)
+library(tm)
+library(ranger)
+library(e1071)
+library(dplyr)
+library(ranger)
+
 ```
 
-## R Markdown
+The following project is adapted from a homework assignment on supervised classification.
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+For this project, I decided to perform supervised classification on a dataset containing the Arabic text of tweets related to the Syrian civil war, along with labels classifying those tweets into one of 7 general content areas. The content areas included:
 
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+- islamic-faith
+- syrian-war
+- is-sympathy
+- is-life
+- anti-west
+- syrian-war
+- Islamophobia
 
-```{r cars}
-summary(cars)
+```{r, include=FALSE}
+
+SyriaData <- read_csv("./SyriaData.csv") %>%
+             select(c(1,5,8,9))
+
+ARstopwords <- read_lines("./ARstopwords") %>%
+                as.data.frame() 
+
+ARstopwords <- rename(ARstopwords, word = .)
+
 ```
 
-## Including Plots
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
 
-You can also embed plots, for example:
+# Unnest Tweet Tokens
 
-```{r pressure, echo=FALSE}
-plot(pressure)
+Syria_tokens <- SyriaData %>%
+            unnest_tokens(output = word, input = text) %>%
+            anti_join(ARstopwords)
+
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+
+# Create document-term matrix
+
+Syria_dtm <- Syria_tokens %>%
+             na.omit() %>%
+             count(`_unit_id`, word) %>%
+             cast_dtm(document = `_unit_id`, 
+                     term = word, 
+                     value = n, 
+                     weighting = tm::weightTfIdf) %>%
+             removeSparseTerms(sparse = .99) 
+
+```
+
+## Exploratory Analysis
+
+Upon importing the data, I discovered that ~600 of the 1350 total observations were classified into a content area, which allowed me to train the model. For the exploratory analysis, I used term frequency inverse document frequency to generate the plot below:
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+
+# Calculate tf-idf
+
+Syria_tfidf <- Syria_tokens %>%
+                  count(`classification`, word) %>%
+                  bind_tf_idf(term = word, document = `classification`, n = n)
+
+# Convert word to a factor column
+
+Plot_Syria <- Syria_tfidf %>%
+                arrange(desc(tf_idf)) %>%
+                mutate(word = factor(word, levels = rev(unique(word))))
+
+
+```
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+
+# Translate Words, Make them Factor
+
+Plot_Syria <- Plot_Syria %>%
+              filter(`classification` %in% c("islamic-faith",
+                      "anti-west", 
+                      "syrian-war")) %>%
+              group_by(`classification`) %>%
+              top_n(5)
+
+Token_levels <- c("Shia (slur)",
+                  "Sanctuaries",
+                  "Support",
+                  "Violate",
+                  "State",
+                  "God",
+                  "Aleppo",
+                  "Damascus",
+                  "oh God",
+                  "Town",
+                  "Factions",
+                  "The Opposition",
+                  "God",
+                  "except",
+                  "for the time being",
+                  "prayer",
+                  "praise to")
+Token_factor <- factor(Plot_Syria$word, levels = Plot_Syria$word, labels = Token_levels)
+
+# graph the top 5 tokens for 3 categories
+
+Plot_Syria %>%
+  ungroup() %>%
+  mutate(word = reorder_within(word, tf_idf, `classification`)) %>%
+  ggplot(aes(Token_factor, tf_idf)) +
+  geom_col() +
+  scale_x_reordered() +
+  labs(x = NULL, y = "tf-idf") +
+  facet_wrap(~ `classification`, scales = "free") +
+  coord_flip()+
+  theme_minimal()
+
+```
+
+We see like-terms in the three content areas depicted. Particularly within the islamic-faith content area, we observe religious terms. These tokens ended up being particularly useful in the statistical learning model.
+
+## Supervised Classification
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+
+# Filter Out Dropped Observation
+
+fSyriaData <- SyriaData %>%
+                filter(`_unit_id`!=
+                SyriaData$`_unit_id`[!SyriaData$`_unit_id`%in%Syria_dtm[["dimnames"]][["Docs"]]]) %>%
+                na.omit()
+
+```
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+
+# Model Estimation
+
+Syria_slice <- slice(fSyriaData, 1:1349)
+
+Syria_rf_200 <- caret::train(x = as.matrix(Syria_dtm),
+                  y = factor(Syria_slice$classification),
+                  method = "ranger",
+                  num.trees = 200,
+                  importance = "impurity",
+                  trControl = trainControl(method = "oob"))
+
+Syria_rf_200$finalModel
+  
+```
+
+Removing sparse terms allows us to increase the number of "trees" in the model, and decrease the prediction error.
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+
+# Extract variable importance metrics
+
+SyriaFactor <-  Syria_rf_200$finalModel %>%
+                  ranger::importance() %>%
+                  enframe(name = "variable", value = "varimp") %>%
+                  top_n(n = 15, wt = varimp)
+
+Syriafct <- Syria_rf_200$finalModel %>%
+                  ranger::importance() %>%
+                  enframe(name = "variable", value = "varimp")
+
+# Factor Tokens
+
+NToken_levels <- c("God",
+                  "Oh God",
+                  "Except",
+                  "God (alternative)",
+                  "the Country",
+                  "Aleppo",
+                  "Syria",
+                  "Damascus",
+                  "Thing",
+                  "Muslims",
+                  "Remembrance",
+                  "Oh",
+                  "the Great",
+                  "By God",
+                  "Breaking")
+
+NToken_factor <- factor(Syriafct, levels = 1:15, labels = NToken_levels)
+
+# Generate Plot
+SyriaFactor %>%
+  ggplot(aes(x = NToken_levels, y = varimp)) +
+      geom_col() +
+      coord_flip() +
+      labs(x = "Token",
+            y = "Variable importance (higher is more important)")
+
+```
