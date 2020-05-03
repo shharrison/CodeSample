@@ -1,7 +1,7 @@
 ---
-title: "Code Sample 1"
+title: "Code Sample"
 author: "Seth Harrison"
-date: "4/30/2020"
+date: "05/03/2020"
 output: github_document
 ---
 

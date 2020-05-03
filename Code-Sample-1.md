@@ -1,7 +1,7 @@
-Code Sample 1
+Code Sample
 ================
 Seth Harrison
-4/30/2020
+05/03/2020
 
 # Tidy Data
 
