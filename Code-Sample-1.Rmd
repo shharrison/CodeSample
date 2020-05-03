@@ -25,7 +25,9 @@ library(corpus)
 
 ```{r, message=FALSE,warning=FALSE}
 
-Data <- read_csv("SyriaData.csv")
+Data <- read_csv("SyriaData.csv") %>%
+        select(c(1,5,8,9)) %>%
+        na.omit()
 
 stop_words <- read_lines("ARstopwords") %>%
               as_data_frame()
@@ -54,6 +56,26 @@ dtm <- tokens %>%
    # create a document-term matrix with all features and term frequency inverse document frequency 
    cast_dtm(document = id, term = word, value = n, weighting = tm::weightTfIdf)
 
+  # remove sparse terms
+dtm <- removeSparseTerms(dtm, sparse = .99)
+
 ```
 
-# 
+# Estimate model
+
+```{r, message=FALSE, warning=FALSE}
+
+slice <- slice(Data, 1:614)
+
+rf <- train(x = as.matrix(dtm),
+                     y = factor(slice$classification),
+                     method = "ranger",
+                     num.trees = 200,
+                     importance = "impurity",
+                     trControl = trainControl(method = "oob"))
+
+rf$finalModel
+
+```
+
+ 
