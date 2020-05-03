@@ -3,55 +3,35 @@ Code Sample 1
 Seth Harrison
 4/30/2020
 
-The following project is adapted from a homework assignment on
-supervised classification.
+# Tidy Data
 
-For this project, I decided to perform supervised classification on a
-dataset containing the Arabic text of tweets related to the Syrian civil
-war, along with labels classifying those tweets into one of 7 general
-content areas. The content areas included:
+``` r
+Data <- read_csv("SyriaData.csv")
 
-  - islamic-faith
-  - syrian-war
-  - is-sympathy
-  - is-life
-  - anti-west
-  - syrian-war
-  - Islamophobia
+stop_words <- read_lines("ARstopwords") %>%
+              as_data_frame()
 
-## Exploratory Analysis
+stop_words <- rename(stop_words, text = value)
 
-Upon importing the data, I discovered that \~600 of the 1350 total
-observations were classified into a content area, which allowed me to
-train the model. For the exploratory analysis, I used term frequency
-inverse document frequency to generate the plot below:
+tokens <- Data %>%
+   unnest_tokens(output = text, input = text) %>%
+   # remove stop words
+   anti_join(stop_words) %>%
+   # stem the words
+   corpus::as_corpus_frame() %>%
+   mutate(word = corpus::text_tokens(text, stemmer = "ar"))
 
-![](Code-Sample-1_files/figure-gfm/unnamed-chunk-5-1.png)<!-- -->
+tokens$word <- as.character(tokens$word)
+```
 
-We see like-terms in the three content areas depicted. Particularly
-within the islamic-faith content area, we observe religious terms. These
-tokens ended up being particularly useful in the statistical learning
-model.
+# Create Document-Term Matrix
 
-## Supervised Classification
+``` r
+dtm <- tokens %>%
+   # get count of each token in each document
+   count(id, word) %>%
+   # create a document-term matrix with all features and term frequency inverse document frequency 
+   cast_dtm(document = id, term = word, value = n, weighting = tm::weightTfIdf)
+```
 
-    ## Ranger result
-    ## 
-    ## Call:
-    ##  ranger::ranger(dependent.variable.name = ".outcome", data = x,      mtry = min(param$mtry, ncol(x)), min.node.size = param$min.node.size,      splitrule = as.character(param$splitrule), write.forest = TRUE,      probability = classProbs, ...) 
-    ## 
-    ## Type:                             Classification 
-    ## Number of trees:                  200 
-    ## Sample size:                      614 
-    ## Number of independent variables:  56 
-    ## Mtry:                             29 
-    ## Target node size:                 1 
-    ## Variable importance mode:         impurity 
-    ## Splitrule:                        extratrees 
-    ## Number of random splits:          1 
-    ## OOB prediction error:             24.76 %
-
-Removing sparse terms allows us to increase the number of “trees” in the
-model, and decrease the prediction error.
-
-![](Code-Sample-1_files/figure-gfm/unnamed-chunk-8-1.png)<!-- -->
+#
